@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
+const bodyParser = require("body-parser");
 require("dotenv").config();
 
 const app = express();
@@ -10,7 +11,7 @@ const app = express();
 app.use(cors());
 
 // JSON parsing for normal routes
-app.use(express.json());
+app.use(bodyParser.json());
 
 // ===== Razorpay instance =====
 const razorpay = new Razorpay({
