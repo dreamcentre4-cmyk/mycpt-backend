@@ -2,16 +2,52 @@ const express = require("express");
 const cors = require("cors");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
-const bodyParser = require("body-parser");
 require("dotenv").config();
 
 const app = express();
 
-// ===== Middleware =====
+/**
+ * ⚠️ IMPORTANT:
+ * Razorpay webhook MUST use raw body
+ * and MUST be declared BEFORE express.json()
+ */
+app.post(
+  "/razorpay-webhook",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const signature = req.headers["x-razorpay-signature"];
+    const body = req.body.toString();
+
+    const expectedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(body)
+      .digest("hex");
+
+    if (signature !== expectedSignature) {
+      console.log("❌ Webhook signature mismatch");
+      return res.status(401).send("Invalid signature");
+    }
+
+    const event = JSON.parse(body);
+    console.log("✅ Webhook verified:", event.event);
+
+    // You can handle payment.captured here later
+    res.sendStatus(200);
+  }
+);
+
+// AFTER webhook
+app.use(express.json());
 app.use(cors());
 
-// JSON parsing for normal routes
-app.use(bodyParser.json());
+// ===== DEBUG (SAFE TO REMOVE LATER) =====
+console.log("KEY ID:", process.env.RAZORPAY_KEY_ID ? "OK" : "MISSING");
+console.log("KEY SECRET:", process.env.RAZORPAY_KEY_SECRET ? "OK" : "MISSING");
+console.log(
+  "WEBHOOK SECRET:",
+  process.env.RAZORPAY_WEBHOOK_SECRET ? "OK" : "MISSING"
+);
 
 // ===== Razorpay instance =====
 const razorpay = new Razorpay({
@@ -28,7 +64,7 @@ app.post("/create-order", async (req, res) => {
       return res.status(400).json({ error: "Invalid request" });
     }
 
-    let amount = 0;
+    let amount;
     if (plan === "one_time") amount = 80;
     else if (plan === "package") amount = 499;
     else return res.status(400).json({ error: "Invalid plan" });
@@ -36,54 +72,31 @@ app.post("/create-order", async (req, res) => {
     const order = await razorpay.orders.create({
       amount: amount * 100, // paise
       currency: "INR",
-      receipt: `${uid}_${Date.now()}`,
-      notes: { uid, plan }, // IMPORTANT for webhook
+
+      // ✅ FIXED: receipt ALWAYS under 40 chars
+      receipt: `cpt_${Date.now().toString().slice(-8)}`,
+
+      // Store real data here (correct place)
+      notes: {
+        uid,
+        plan,
+      },
     });
 
     res.json({
       orderId: order.id,
-      amount,
-      currency: "INR",
+      amount: order.amount,
+      currency: order.currency,
+      key: process.env.RAZORPAY_KEY_ID,
     });
   } catch (err) {
-    console.error("Create order error:", err);
+    console.error("❌ Create order error:", err);
     res.status(500).json({ error: "Order creation failed" });
   }
 });
 
-// ===== RAZORPAY WEBHOOK =====
-// Must use raw body (NOT express.json)
-app.post(
-  "/razorpay-webhook",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    const signature = req.headers["x-razorpay-signature"];
-    const body = req.body.toString();
-
-    const expectedSignature = crypto
-      .createHmac("sha256", secret)
-      .update(body)
-      .digest("hex");
-
-    if (signature !== expectedSignature) {
-      console.log("Webhook signature mismatch!");
-      return res.status(401).send("Invalid signature");
-    }
-
-    const webhookData = JSON.parse(body);
-    console.log("Payment verified:", webhookData.event);
-
-    // 👉 Later: update Firebase here using:
-    // webhookData.payload.payment.entity.notes.uid
-    // webhookData.payload.payment.entity.notes.plan
-
-    res.sendStatus(200);
-  }
-);
-
 // ===== START SERVER =====
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
