@@ -1,3 +1,4 @@
+const { admin, db } = require("./firebaseAdmin");
 const express = require("express");
 const cors = require("cors");
 const Razorpay = require("razorpay");
@@ -32,7 +33,6 @@ app.post(
     const event = JSON.parse(body);
     console.log("✅ Webhook verified:", event.event);
 
-    // You can handle payment.captured here later
     res.sendStatus(200);
   }
 );
@@ -70,17 +70,10 @@ app.post("/create-order", async (req, res) => {
     else return res.status(400).json({ error: "Invalid plan" });
 
     const order = await razorpay.orders.create({
-      amount: amount * 100, // paise
+      amount: amount * 100,
       currency: "INR",
-
-      // ✅ FIXED: receipt ALWAYS under 40 chars
       receipt: `cpt_${Date.now().toString().slice(-8)}`,
-
-      // Store real data here (correct place)
-      notes: {
-        uid,
-        plan,
-      },
+      notes: { uid, plan },
     });
 
     res.json({
